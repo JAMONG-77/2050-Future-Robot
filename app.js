@@ -5,7 +5,7 @@
  * - [탭 1] 🛠️ 로봇 설계실 (이름 로그인 비공개 개별 공간, 7단계 입력, 예시 태그, 실시간 코칭, 2종 자동 변환, 자동 이어쓰기)
  * - [탭 2] 🏛️ 미래 로봇 박람회 전시관 (부스 카드 갤러리, MP4/영상 링크 첨부, 좌우 분할 상세 모달)
  * - [탭 3] 🔒 교사 관리자 화면 (비밀번호 인증, 실시간 현황/필터, 상세 확인 및 수정, 피드백 수정 요청/전시 승인, 버전 이력 비교)
- * - 실시간 동기화: LocalStorage(0.1초 즉시 저장) + Supabase Realtime/DB & Storage(4초 자동 전송 + 단계 이동 시 즉시 전송) + GAS 보조 연동
+ * - 실시간 동기화: LocalStorage(0.1초 즉시 저장) + Supabase Realtime/DB & Storage(4초 자동 전송 + 단계 이동 시 즉시 전송)
  */
 
 // ============================================================================
@@ -18,19 +18,16 @@ const STORAGE_KEYS = {
   LAST_TYPED_NAME: 'robot_expo_2050_last_name_v2',
   TEACHER_UNLOCKED: 'robot_expo_2050_teacher_unlocked_v2',
   TEACHER_PIN_HASH: 'robot_expo_2050_teacher_pin_hash_v2',
-  GAS_WEB_APP_URL: 'robot_expo_2050_gas_url_v1',
   SUPABASE_URL: 'robot_expo_2050_supabase_url_v1',
   SUPABASE_ANON_KEY: 'robot_expo_2050_supabase_key_v1',
   DELETED_MAP: 'robot_expo_2050_deleted_map_v1',
 };
 
-// Supabase 기본 연결 설정 (교사 화면 [⚡ Supabase 설정]에서도 입력/저장 가능하며, 연결 시 모든 학생 기기에 자동 공유됨)
-const DEFAULT_SUPABASE_URL = '';
-const DEFAULT_SUPABASE_ANON_KEY = '';
+// Supabase 영구 기본 연결 설정 (어떤 기기에서도 추가 입력 없이 즉시 실시간 동기화)
+const DEFAULT_SUPABASE_URL = 'https://ybdxajahpvqbsglolnqi.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZHhhamFocHZxYnNnbG9sbnFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ1NDg4ODEsImV4cCI6MjExMDEyNDg4MX0.b8Udmwl1U3EWyoQ2A8qHVakWx7CPFYY4gdosJRs5C2A';
 const SUPABASE_TABLE = 'robot_expo_students';
 const SUPABASE_VIDEO_BUCKET = 'robot-videos';
-
-const DEFAULT_GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycby-EdAgehj2XvdBo5SztxbPYwjqssFOe7Pwh6mQQt7tG_-EGi3p_2kTRaX4Bjryw42k/exec';
 // 관리자 비밀번호 SHA-256 해시값 (평문 노출 방지)
 const DEFAULT_TEACHER_PIN_HASH = '3b4bee7de5f1464e59301f5cab582e9ada969bb1964a64a8dfa392c071480337';
 
@@ -187,9 +184,8 @@ let state = {
   videoAttachTargetId: null,          // 영상 첨부 모달 대상 학생
   videoModalTab: 'file',              // 'file' | 'url'
   pendingVideoFileData: null,         // 업로드 대기 중인 로컬 비디오 파일 객체
-  supabaseUrl: '',                    // Supabase Project URL
-  supabaseAnonKey: '',                // Supabase anon public key
-  gasUrl: '',                         // Google Apps Script Web App URL (보조 백업)
+  supabaseUrl: DEFAULT_SUPABASE_URL,         // Supabase Project URL
+  supabaseAnonKey: DEFAULT_SUPABASE_ANON_KEY, // Supabase anon public key
   isSyncing: false,
   lastSyncedAt: null,
 };
@@ -395,18 +391,19 @@ function initStorageAndState() {
   // 교사 잠금 해제 상태 복원
   state.teacherUnlocked = sessionStorage.getItem(STORAGE_KEYS.TEACHER_UNLOCKED) === 'true';
 
-  // Supabase URL & Key 복원
+  // Supabase URL & Key 복원 (어떤 기기에서도 기본값 자동 적용)
   const savedSbUrl = (localStorage.getItem(STORAGE_KEYS.SUPABASE_URL) || '').trim();
   const savedSbKey = (localStorage.getItem(STORAGE_KEYS.SUPABASE_ANON_KEY) || '').trim();
   state.supabaseUrl = savedSbUrl || DEFAULT_SUPABASE_URL;
   state.supabaseAnonKey = savedSbKey || DEFAULT_SUPABASE_ANON_KEY;
-
-  // GAS URL 기본값 자동 설정
-  const savedGasUrl = (localStorage.getItem(STORAGE_KEYS.GAS_WEB_APP_URL) || '').trim();
-  state.gasUrl = savedGasUrl || DEFAULT_GAS_WEB_APP_URL;
-  if (!savedGasUrl && DEFAULT_GAS_WEB_APP_URL) {
-    localStorage.setItem(STORAGE_KEYS.GAS_WEB_APP_URL, DEFAULT_GAS_WEB_APP_URL);
+  if (!savedSbUrl) {
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, DEFAULT_SUPABASE_URL);
   }
+  if (!savedSbKey) {
+    localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, DEFAULT_SUPABASE_ANON_KEY);
+  }
+
+  initSupabaseClient();
   updateSyncStatusHeader();
 }
 
@@ -530,27 +527,29 @@ function findStudentByIdOrName(query) {
 // 5-2. Supabase & Cloud 연동 헬퍼
 // ============================================================================
 function isSupabaseConfigured() {
+  const url = state.supabaseUrl || DEFAULT_SUPABASE_URL;
+  const key = state.supabaseAnonKey || DEFAULT_SUPABASE_ANON_KEY;
   return Boolean(
-    state.supabaseUrl &&
-    state.supabaseUrl.startsWith('https://') &&
-    state.supabaseUrl.includes('.supabase.co') &&
-    state.supabaseAnonKey &&
-    state.supabaseAnonKey.length > 20
+    url &&
+    url.startsWith('https://') &&
+    url.includes('.supabase.co') &&
+    key &&
+    key.length > 20
   );
 }
 
 function isGasConfigured() {
-  return Boolean(
-    state.gasUrl &&
-    state.gasUrl.startsWith('https://script.google.com/macros/s/')
-  );
+  return false;
 }
 
 function isCloudConfigured() {
-  return isSupabaseConfigured() || isGasConfigured();
+  return isSupabaseConfigured();
 }
 
 function initSupabaseClient() {
+  if (!state.supabaseUrl) state.supabaseUrl = DEFAULT_SUPABASE_URL;
+  if (!state.supabaseAnonKey) state.supabaseAnonKey = DEFAULT_SUPABASE_ANON_KEY;
+
   if (!isSupabaseConfigured()) {
     supabaseClient = null;
     if (supabaseRealtimeChannel) {
@@ -593,7 +592,7 @@ function studentToSupabaseRow(student) {
     status: String(student.status || 'drafting'),
     inputs: student.inputs || {},
     video_prompt: String(student.videoPrompt || ''),
-    spec_sheet: student.specSheet || null,
+    spec_sheet: student.specSheet || {},
     teacher_feedback: String(student.teacherFeedback || ''),
     feedback_at: String(student.feedbackAt || ''),
     video: student.video || { type: 'none', url: '', title: '' },
@@ -713,17 +712,14 @@ function updateSyncStatusHeader(customMessage) {
 
   if (isSupabaseConfigured()) {
     dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
-    text.textContent = 'Supabase 실시간 동기화 중';
-  } else if (isGasConfigured()) {
-    dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
-    text.textContent = '실시간 동기화 중';
+    text.textContent = '⚡ Supabase 실시간 동기화 연결됨';
   } else {
     dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
     text.textContent = '로컬 실시간 동기화 중';
   }
 }
 
-// 단일 학생 변경사항만 개별 행(Row)으로 클라우드(Supabase + GAS 백업)에 비동기 전송 (절대 전체 삭제 안 함)
+// 단일 학생 변경사항만 개별 행(Row)으로 Supabase에 비동기 전송 (절대 전체 삭제 안 함)
 async function syncStudentToCloud(student, newVersionEntry = null) {
   if (!student) return;
   if (!isCloudConfigured()) return;
@@ -731,7 +727,7 @@ async function syncStudentToCloud(student, newVersionEntry = null) {
   try {
     updateSyncStatusHeader('실시간 저장 중...');
 
-    // 1) Supabase 개별 행 Upsert
+    // Supabase 개별 행 Upsert
     if (isSupabaseConfigured()) {
       if (!supabaseClient) initSupabaseClient();
       if (supabaseClient) {
@@ -744,22 +740,6 @@ async function syncStudentToCloud(student, newVersionEntry = null) {
         } else {
           state.lastSyncedAt = new Date().toISOString();
         }
-      }
-    }
-
-    // 2) GAS 보조 백업이 설정되어 있으면 개별 행 Upsert 전송 (History_Log 누적 포함)
-    if (isGasConfigured()) {
-      const res = await fetch(state.gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'upsert_student',
-          student,
-          newVersionEntry,
-        }),
-      });
-      if (res.ok) {
-        state.lastSyncedAt = new Date().toISOString();
       }
     }
 
@@ -779,7 +759,7 @@ async function syncStudentToGas(student, newVersionEntry = null) {
   return syncStudentToCloud(student, newVersionEntry);
 }
 
-// 클라우드(Supabase 우선, 미설정 시 GAS)에서 전체 학생 목록을 불러와 안전하게 병합 (절대 sync_all 호출 안 함)
+// Supabase 클라우드에서 전체 학생 목록을 불러와 안전하게 병합
 async function pullFromCloudNow(silent = false) {
   if (!isCloudConfigured()) {
     if (!silent) showToast('먼저 Supabase 연결 정보를 설정해 주세요.', 'warning');
@@ -793,7 +773,7 @@ async function pullFromCloudNow(silent = false) {
 
     let fetchedStudents = null;
 
-    // 1) Supabase가 설정되어 있으면 Supabase에서 조회
+    // Supabase에서 전체 학생 행 조회
     if (isSupabaseConfigured()) {
       if (!supabaseClient) initSupabaseClient();
       if (supabaseClient) {
@@ -809,52 +789,13 @@ async function pullFromCloudNow(silent = false) {
       }
     }
 
-    // 2) Supabase가 아직 설정되지 않았거나 GAS에서 Supabase 공유 설정을 받아올 때
-    if (isGasConfigured() && (!isSupabaseConfigured() || fetchedStudents === null)) {
-      const res = await fetch(`${state.gasUrl}?t=${Date.now()}`, { method: 'GET' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
-
-      // 교사가 설정해 둔 Supabase 연결 정보가 있으면 학생 기기에도 자동으로 적용!
-      if (
-        result.supabaseConfig &&
-        result.supabaseConfig.supabaseUrl &&
-        result.supabaseConfig.supabaseAnonKey &&
-        !isSupabaseConfigured()
-      ) {
-        state.supabaseUrl = String(result.supabaseConfig.supabaseUrl).trim();
-        state.supabaseAnonKey = String(result.supabaseConfig.supabaseAnonKey).trim();
-        localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, state.supabaseUrl);
-        localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, state.supabaseAnonKey);
-        initSupabaseClient();
-        // 이제 Supabase에서 다시 데이터 로드
-        if (supabaseClient) {
-          const { data, error } = await supabaseClient
-            .from(SUPABASE_TABLE)
-            .select('*')
-            .order('updated_at', { ascending: true });
-          if (!error && Array.isArray(data)) {
-            fetchedStudents = data.map(supabaseRowToStudent).filter(Boolean);
-          }
-        }
-      }
-
-      if (fetchedStudents === null) {
-        const isSuccess = result.success === true || result.ok === true;
-        if (!isSuccess || !Array.isArray(result.students)) {
-          throw new Error(result.error || '응답 데이터 형식 오류');
-        }
-        fetchedStudents = result.students;
-      }
-    }
-
     if (Array.isArray(fetchedStudents)) {
       const deletedRemoteIds = mergeRemoteStudents(fetchedStudents);
       state.lastSyncedAt = new Date().toISOString();
       saveStudentsToLocalStorage(false);
       refreshAllViews(false);
 
-      // 삭제 기록(Tombstone)이나 초기 더미(김미래)가 원격에 남아있으면 전체 덮어쓰기(sync_all) 대신 해당 ID만 개별 삭제
+      // 삭제 기록(Tombstone)이나 초기 더미(김미래)가 원격에 남아있으면 해당 ID만 개별 삭제
       if (deletedRemoteIds.length > 0) {
         for (const delId of deletedRemoteIds) {
           deleteStudentFromCloud(delId, true);
@@ -1015,10 +956,10 @@ function mergeRemoteStudents(remoteList) {
   return deletedRemoteIds;
 }
 
-// 전체 덮어쓰기(clearContents) 없이 로컬의 학생들을 개별 행으로 안전하게 병합 업로드
-async function pushAllLocalToGas(silent = false) {
+// 로컬 학생 데이터를 Supabase에 개별 안전 병합 업로드
+async function pushAllLocalToCloud(silent = false) {
   if (!isCloudConfigured()) {
-    if (!silent) showToast('먼저 Supabase 또는 클라우드 연결을 설정해 주세요.', 'warning');
+    if (!silent) showToast('먼저 Supabase 연결을 설정해 주세요.', 'warning');
     return false;
   }
   try {
@@ -1036,23 +977,10 @@ async function pushAllLocalToGas(silent = false) {
       }
     }
 
-    if (isGasConfigured()) {
-      for (const st of validStudents) {
-        await fetch(state.gasUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'upsert_student',
-            student: st,
-          }),
-        });
-      }
-    }
-
     state.lastSyncedAt = new Date().toISOString();
     updateSyncStatusHeader();
     if (!silent) {
-      showToast(`⬆️ 학생 ${validStudents.length}명의 데이터를 삭제 없이 안전하게 병합 업로드했습니다!`, 'success');
+      showToast(`⬆️ 학생 ${validStudents.length}명의 데이터를 삭제 없이 안전하게 Supabase에 병합 업로드했습니다!`, 'success');
     }
     return true;
   } catch (err) {
@@ -1063,6 +991,8 @@ async function pushAllLocalToGas(silent = false) {
     return false;
   }
 }
+
+const pushAllLocalToGas = pushAllLocalToCloud;
 
 function startRealtimeSyncLoop() {
   setInterval(() => {
@@ -1323,7 +1253,7 @@ function loginAsStudent(studentName) {
     };
     state.students.push(student);
     saveStudentsToLocalStorage();
-    syncStudentToGas(student);
+    syncStudentToCloud(student);
   }
 
   state.currentStudentId = student.studentId;
@@ -1930,7 +1860,7 @@ function submitToExpoAndTeacher() {
   student.updatedAt = nowIso;
 
   saveStudentsToLocalStorage();
-  syncStudentToGas(student, newVersionEntry);
+  syncStudentToCloud(student, newVersionEntry);
   refreshAllViews(false);
 
   showToast(`🎉 [${versionLabel}] 제출 완료! 선생님께서 [전시 승인]하시면 박람회 전시관에 부스가 공개됩니다.`, 'success');
@@ -2178,7 +2108,7 @@ function likeBooth(studentId) {
   student.likes = (Number(student.likes) || 0) + 1;
   student.updatedAt = new Date().toISOString();
   saveStudentsToLocalStorage();
-  syncStudentToGas(student);
+  syncStudentToCloud(student);
   renderExpoBooths();
 }
 
@@ -3280,7 +3210,7 @@ async function deleteStudentFromCloud(studentId, studentName = '') {
   try {
     updateSyncStatusHeader('개별 행 삭제 동기화 중...');
 
-    // 1) Supabase 개별 행(Row) 삭제 (전체 테이블 삭제 절대 없음)
+    // Supabase 개별 행(Row) 삭제 (전체 테이블 삭제 절대 없음)
     if (isSupabaseConfigured() && supabaseClient) {
       try {
         await supabaseClient
@@ -3296,19 +3226,6 @@ async function deleteStudentFromCloud(studentId, studentName = '') {
       } catch (sbErr) {
         console.warn('Supabase 개별 학생 행 삭제 실패:', sbErr);
       }
-    }
-
-    // 2) GAS 개별 행(Row) 삭제 (sync_all 전체 덮어쓰기 완전 제거!)
-    if (isGasConfigured()) {
-      await fetch(state.gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'delete_student',
-          studentId,
-          studentName,
-        }),
-      });
     }
 
     state.lastSyncedAt = new Date().toISOString();
@@ -3505,7 +3422,7 @@ function closeHistoryCompareModal() {
 }
 
 // ============================================================================
-// 11. Supabase 실시간 DB & GAS 클라우드 설정 모달 (교사 관리자 전용)
+// 11. Supabase 실시간 DB 설정 모달 (교사 관리자 전용)
 // ============================================================================
 function openGasConfigModal() {
   const modal = document.getElementById('gas-config-modal');
@@ -3513,18 +3430,14 @@ function openGasConfigModal() {
 
   const sbUrlInput = document.getElementById('supabase-url-input');
   const sbKeyInput = document.getElementById('supabase-key-input');
-  const gasUrlInput = document.getElementById('gas-url-input');
   const msgEl = document.getElementById('gas-config-status-msg');
 
-  if (sbUrlInput) sbUrlInput.value = state.supabaseUrl || '';
-  if (sbKeyInput) sbKeyInput.value = state.supabaseAnonKey || '';
-  if (gasUrlInput) gasUrlInput.value = state.gasUrl || '';
+  if (sbUrlInput) sbUrlInput.value = state.supabaseUrl || DEFAULT_SUPABASE_URL;
+  if (sbKeyInput) sbKeyInput.value = state.supabaseAnonKey || DEFAULT_SUPABASE_ANON_KEY;
 
   if (msgEl) {
     if (isSupabaseConfigured()) {
-      msgEl.textContent = '⚡ 현재 Supabase 실시간 DB 및 MP4 영상 Storage가 활성화되어 있습니다.';
-    } else if (isGasConfigured()) {
-      msgEl.textContent = '☁️ 현재 Google Apps Script 시트 연동 중입니다. 위에 Supabase URL과 Anon Key를 입력하시면 초고속 실시간 DB 및 MP4 영상 공유가 활성화됩니다.';
+      msgEl.textContent = '⚡ Supabase 실시간 DB 및 영상 Storage가 영구 연동되어 모든 기기에서 즉시 동기화됩니다.';
     } else {
       msgEl.textContent = '💡 Supabase Project URL과 Anon Key를 입력하면 실시간 동기화 및 MP4 영상 파일 공유가 즉시 활성화됩니다.';
     }
@@ -3537,57 +3450,29 @@ function closeGasConfigModal() {
 }
 
 async function saveCloudConfig() {
-  const sbUrl = (document.getElementById('supabase-url-input')?.value || '').trim();
-  const sbKey = (document.getElementById('supabase-key-input')?.value || '').trim();
-  const gasUrl = (document.getElementById('gas-url-input')?.value || '').trim();
+  const sbUrl = (document.getElementById('supabase-url-input')?.value || '').trim() || DEFAULT_SUPABASE_URL;
+  const sbKey = (document.getElementById('supabase-key-input')?.value || '').trim() || DEFAULT_SUPABASE_ANON_KEY;
 
   if (sbUrl && !sbUrl.startsWith('https://')) {
     showToast('올바른 Supabase Project URL(https://xxxx.supabase.co)을 입력해 주세요.', 'warning');
     return;
   }
 
-  if (gasUrl && !gasUrl.startsWith('https://script.google.com/macros/s/')) {
-    showToast('올바른 Google Apps Script 웹 앱 URL을 입력해 주세요.', 'warning');
-    return;
-  }
-
   state.supabaseUrl = sbUrl;
   state.supabaseAnonKey = sbKey;
-  state.gasUrl = gasUrl || DEFAULT_GAS_WEB_APP_URL;
 
   localStorage.setItem(STORAGE_KEYS.SUPABASE_URL, sbUrl);
   localStorage.setItem(STORAGE_KEYS.SUPABASE_ANON_KEY, sbKey);
-  localStorage.setItem(STORAGE_KEYS.GAS_WEB_APP_URL, state.gasUrl);
 
   initSupabaseClient();
   updateSyncStatusHeader();
-
-  // 교사 PC에서 설정한 Supabase URL/Key를 GAS에도 저장하여 모든 학생 기기가 자동 공유받도록 함
-  if (isGasConfigured() && sbUrl && sbKey) {
-    try {
-      fetch(state.gasUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'save_supabase_config',
-          supabaseUrl: sbUrl,
-          supabaseAnonKey: sbKey,
-        }),
-      }).catch(() => {});
-    } catch {
-      // ignore
-    }
-  }
 
   const msgEl = document.getElementById('gas-config-status-msg');
   if (isSupabaseConfigured()) {
     showToast('⚡ Supabase 실시간 DB 및 영상 Storage 설정이 저장되었습니다!', 'success');
     if (msgEl) {
-      msgEl.textContent = '⚡ Supabase 설정 저장 완료! 연결 및 실시간 구독을 시작합니다...';
+      msgEl.textContent = '⚡ Supabase 연결 및 실시간 구독을 시작합니다...';
     }
-    await pullFromCloudNow(false);
-  } else if (isGasConfigured()) {
-    showToast('☁️ 구글 시트 연동 설정이 저장되었습니다.', 'success');
     await pullFromCloudNow(false);
   } else {
     showToast('💾 로컬 스토리지 모드로 저장되었습니다.', 'info');
@@ -3618,7 +3503,7 @@ async function testCloudConnection() {
       }
 
       if (msgEl) {
-        msgEl.textContent = `✅ Supabase 연결 성공! robot_expo_students 테이블 및 실시간 채널과 정상 통신 중입니다.`;
+        msgEl.textContent = `✅ Supabase 연결 성공! robot_expo_students 테이블(${data?.length || 0}개 이상 확인) 및 실시간 채널과 정상 통신 중입니다.`;
       }
       showToast('✅ Supabase 실시간 DB 연결 테스트 성공!', 'success');
       return;
@@ -3627,15 +3512,6 @@ async function testCloudConnection() {
         msgEl.textContent = `❌ Supabase 연결 실패: ${err.message || err}`;
       }
       return;
-    }
-  }
-
-  if (isGasConfigured()) {
-    const ok = await pullFromCloudNow(false);
-    if (msgEl) {
-      msgEl.textContent = ok
-        ? '✅ 구글 스프레드시트 연결 성공! (Supabase 설정 입력 시 초고속 DB + MP4 영상 공유가 활성화됩니다)'
-        : '❌ 연결 실패. 웹 앱 배포 권한을 확인해 주세요.';
     }
   }
 }
@@ -3707,21 +3583,6 @@ async function copySupabaseSetupSql() {
   } catch {
     showToast('프로젝트 폴더 내 supabase_setup.sql 파일을 열어 복사해 주세요.', 'info');
   }
-}
-
-async function copyGasBackendCode() {
-  try {
-    const res = await fetch('google_apps_script.js');
-    if (res.ok) {
-      const code = await res.text();
-      await navigator.clipboard.writeText(code);
-      showToast('📋 google_apps_script.js 전체 코드가 복사되었습니다! 구글 시트 Apps Script에 붙여넣으세요.', 'success');
-      return;
-    }
-  } catch {
-    // ignore fetch error on file://
-  }
-  showToast('프로젝트 폴더 내 google_apps_script.js 파일의 코드를 복사하여 붙여넣어 주세요!', 'info');
 }
 
 // ============================================================================
