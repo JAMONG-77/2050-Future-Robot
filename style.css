@@ -1,0 +1,162 @@
+/* ==========================================================================
+   2050 미래 로봇 박람회 - Custom Styles (Tailwind CSS 보완)
+   ========================================================================== */
+
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+
+:root {
+  --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Noto Sans KR', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: #0f172a;
+  overflow-x: hidden;
+}
+
+/* 미래형 배경 그리드 패턴 */
+.bg-expo-grid {
+  background-color: #f8fafc;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+    linear-gradient(to right, rgba(226, 232, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(226, 232, 240, 0.5) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+}
+
+/* 예시 태그 버튼 호버 및 클릭 애니메이션 */
+.tag-chip {
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.tag-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px -2px rgba(59, 130, 246, 0.22);
+}
+
+.tag-chip:active {
+  transform: translateY(0) scale(0.96);
+}
+
+/* 주황색 실시간 구체화 코칭 박스 애니메이션 */
+.coaching-box {
+  animation: coachingSlideIn 0.25s ease-out;
+}
+
+@keyframes coachingSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 수정 요청 도착 배너 펄스 효과 */
+.revision-banner-pulse {
+  animation: subtlePulse 2.4s infinite ease-in-out;
+}
+
+@keyframes subtlePulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(249, 115, 22, 0);
+  }
+}
+
+/* 박람회 부스 카드 호버 효과 */
+.booth-card {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.booth-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+}
+
+/* 모달 백드롭 블러 및 페이드인 */
+.modal-backdrop {
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-content-anim {
+  animation: modalScaleUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 시네마틱 로봇 AI 프리뷰 캔버스 애니메이션 */
+.holo-scanline {
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0),
+    rgba(255,255,255,0) 50%,
+    rgba(56, 189, 248, 0.12) 50%,
+    rgba(56, 189, 248, 0.12)
+  );
+  background-size: 100% 6px;
+}
+
+@keyframes floatRobot {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(1deg); }
+}
+
+@keyframes radarPing {
+  0% { transform: scale(0.8); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.animate-float-robot {
+  animation: floatRobot 3.2s ease-in-out infinite;
+}
+
+.animate-radar-ping {
+  animation: radarPing 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* 커스텀 스크롤바 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
